@@ -1,71 +1,159 @@
-import { createConnection } from 'net';
-import { GraalRCConfig } from './types';
-import { inflateSync } from 'zlib';
-import { xorEncrypt } from './utils';
+import { GBufferReader, GBufferWriter } from './GBuffer';
+import { GProtocol, ProtocolGen } from './GProtocol';
+import { GSocket } from './GSocket';
+import { PacketTable } from './PacketTable';
+import { ServerCategory, ServerEntry, ServerlistConfig } from './types';
 
-export class ServerLister {
-    private readonly Config: GraalRCConfig;
+function determineServerType(serverName: string): [string, ServerCategory] {
+    switch (serverName.substring(0, 2)) {
+        case 'H ':
+            return [serverName.substring(2).trimLeft(), ServerCategory.hosted];
 
-    constructor(config: GraalRCConfig) {
-        this.Config = config;
+        case 'P ':
+            return [serverName.substring(2).trimLeft(), ServerCategory.gold];
+
+        case 'U ':
+            return [serverName.substring(2).trimLeft(), ServerCategory.hidden];
+
+        case '3 ':
+            return [serverName.substring(2).trimLeft(), ServerCategory.g3d];
     }
 
-    parseServerList(buffer: Buffer) {
-        const servers = [];
-        let offset = 0;
+    return [serverName, ServerCategory.classic];
+}
 
-        while (offset < buffer.length) {
-            const ipLength = buffer.readUInt8(offset);
-            offset += 1;
-            const ip = buffer.toString('utf8', offset, offset + ipLength);
-            offset += ipLength;
-            const port = buffer.readUInt16BE(offset);
-            offset += 2;
-            const nameLength = buffer.readUInt8(offset);
-            offset += 1;
-            const name = buffer.toString('utf8', offset, offset + nameLength);
-            offset += nameLength;
-            const players = buffer.readUInt16BE(offset);
-            offset += 2;
+export class Serverlist {
+    private readonly config: ServerlistConfig = {
+        host: 'listserver.graal.in',
+        port: 14922,
+        account: '',
+        password: '',
+        nickname: 'unknown',
+    };
 
-            servers.push({ ip, port, name, players });
-        }
+    private packetTable: PacketTable;
 
-        return servers;
+    private sock?: GSocket;
+
+    private resolvePromise:
+        | ((value: ServerEntry[] | PromiseLike<ServerEntry[]>) => void)
+        | undefined;
+    // private rejectPromise: ((reason?: any) => void) | undefined;
+
+    constructor(config: Partial<ServerlistConfig>) {
+        this.config = { ...this.config, ...config };
+        this.packetTable = this.initializeHandlers();
     }
 
-    async fetchServerList() {
-        return new Promise((resolve, reject) => {
-            const socket = createConnection({
-                host: this.Config.host,
-                port: this.Config.port,
-                timeout: 10000,
+    public static request(
+        config: Partial<ServerlistConfig>,
+    ): Promise<ServerEntry[]> {
+        return new Promise<ServerEntry[]>(function (resolve, reject) {
+            const serverList = new Serverlist(config);
+            serverList.resolvePromise = resolve;
+
+            serverList.packetTable.on(4, (id: number, packet: Buffer): void => {
+                const discMsg = packet.toString();
+                reject(discMsg);
             });
 
-            socket.setKeepAlive(true, 60000);
-            socket.setNoDelay(true);
-
-            // Handshake
-            socket.write(Buffer.from([0x00, 0x00, 0x00, 0x00, 0x00])); // 5 null bytes
-
-            socket.on('connect', () => {
-                console.log('TCP connection established');
-            });
-
-            socket.on('ready', () => {
-                console.log('Socket ready for data');
-            });
-
-            socket.on('end', () => {
-                console.log('Server ended connection');
-            });
-
-            socket.on('data', (data) => {
-                console.log('Data received from server:', data.length, 'bytes');
-            });
-
-            socket.on('error', reject);
-            socket.on('timeout', () => reject(new Error('Connection timeout')));
+            serverList.sock = GSocket.connect(
+                serverList.config.host,
+                serverList.config.port,
+                {
+                    connectCallback: () => serverList.sendLoginPacket(),
+                    disconnectCallback: (err: any) => reject(err),
+                    packetTable: serverList.packetTable,
+                },
+            );
         });
+    }
+
+    private disconnect() {
+        if (this.sock) {
+            this.sock.disconnect();
+            this.sock = undefined;
+        }
+    }
+
+    private sendLoginPacket(): void {
+        if (!this.sock) return;
+
+        let nb = GBufferWriter.create();
+
+        // Handshake packet
+        let someKey = GProtocol.generateKey();
+        nb.writeGUInt8(someKey);
+        nb.writeChars('G3D30123');
+        nb.writeChars('rc2');
+        this.sock.sendData(this.sock.sendPacket(7, nb.buffer));
+        this.sock.setProtocol(ProtocolGen.Gen5, someKey);
+
+        // Send credentials
+        nb.clear();
+        nb.writeGString(this.config.account);
+        nb.writeGString(this.config.password);
+
+        this.sock.sendData(this.sock.sendPacket(1, nb.buffer));
+    }
+
+    private initializeHandlers() {
+        const packetTable = new PacketTable();
+
+        // packetTable.setCatchAll((id: number, packet: Buffer): void => {
+        //     console.log(`Unhandled Packet (${id}): `, packet);
+        // });
+
+        packetTable.on(0, (id: number, packet: Buffer): void => {
+            let internalBuf = GBufferReader.from(packet);
+            let serverCount = internalBuf.readGUInt8();
+
+            let servers = [];
+            for (let i = 0; i < serverCount; i++) {
+                internalBuf.readGUInt8();
+
+                const serverName = internalBuf.readGString();
+                const serverTypeData = determineServerType(serverName);
+
+                const entry: ServerEntry = {
+                    name: serverTypeData[0],
+                    category: serverTypeData[1],
+                    language: internalBuf.readGString(),
+                    description: internalBuf.readGString(),
+                    url: internalBuf.readGString(),
+                    version: internalBuf.readGString(),
+                    pcount: ~~internalBuf.readGString(),
+                    ip: internalBuf.readGString(),
+                    port: ~~internalBuf.readGString(),
+                };
+
+                servers.push(entry);
+            }
+
+            if (this.resolvePromise) {
+                this.resolvePromise(servers);
+                this.resolvePromise = undefined;
+
+                this.disconnect();
+            }
+        });
+
+        // packetTable.on(2, (id: number, packet: Buffer): void => {
+        //     let statusMsg = packet.toString();
+        //     console.log(`Status Msg: ${statusMsg}`);
+        // });
+
+        // packetTable.on(3, (id: number, packet: Buffer): void => {
+        //     let siteUrl = packet.toString();
+        //     console.log(`Website: ${siteUrl}`);
+        // });
+
+        // packetTable.on(4, (id: number, packet: Buffer): void => {
+        // 	let discMsg = packet.toString();
+        //     console.log(`Disconnected for ${discMsg}`);
+        // 	this.rejectPromise(discMsg);
+        // });
+
+        return packetTable;
     }
 }

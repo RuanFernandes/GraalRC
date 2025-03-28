@@ -20,3 +20,7 @@ export function xorEncrypt(data: Buffer, seed: number): Buffer {
 
     return result;
 }
+
+export function generateKey(): number {
+    return Math.floor(Math.random() * 128);
+}

@@ -1,12 +1,11 @@
-import { ServerLister } from './serverLister';
-import { GraalRCConfig } from './types';
-
 import { config } from 'dotenv';
+import { ServerlistConfig } from './types';
+import { Serverlist } from './serverLister';
 
 const env = config({ path: './.env' });
 
 async function main() {
-    const config: GraalRCConfig = {
+    const config: ServerlistConfig = {
         host: 'listserver.graalonline.com',
         port: 14922,
         account: env.parsed?.ACCOUNT || '',
@@ -14,9 +13,12 @@ async function main() {
         nickname: 'Ruan',
     };
 
-    const serverlister = new ServerLister(config);
-    const servers = await serverlister.fetchServerList();
-    console.log('Servers:', servers);
+    try {
+        const servers = await Serverlist.request(config);
+        console.log(`Servers:`, servers);
+    } catch (error) {
+        console.error('Error:', error);
+    }
 }
 
 main();
