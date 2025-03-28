@@ -1,0 +1,23 @@
+{
+    "name": "ruan-graal-rc",
+    "version": "1.0.0",
+    "description": "",
+    "license": "ISC",
+    "author": "Ruan Fernandes",
+    "type": "commonjs",
+    "main": "index.js",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1",
+        "prepublishOnly": "tsc",
+        "tsc": "tsc",
+        "tscw": "tsc --watch",
+        "ndmon": "nodemon src/index.ts"
+    },
+    "devDependencies": {
+        "@types/node": "^22.13.14",
+        "typescript": "^5.8.2"
+    },
+    "dependencies": {
+        "compressjs": "^1.0.3"
+    }
+}
