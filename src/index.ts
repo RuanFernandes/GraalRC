@@ -14,11 +14,9 @@ async function main() {
         nickname: 'Ruan',
     };
 
-    console.log('Config:', config);
-
-    // const serverlister = new ServerLister(config);
-    // const servers = await serverlister.fetchServerList();
-    // console.log('Servers:', servers);
+    const serverlister = new ServerLister(config);
+    const servers = await serverlister.fetchServerList();
+    console.log('Servers:', servers);
 }
 
 main();

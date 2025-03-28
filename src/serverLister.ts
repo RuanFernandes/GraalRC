@@ -39,31 +39,29 @@ export class ServerLister {
             const socket = createConnection({
                 host: this.Config.host,
                 port: this.Config.port,
-                timeout: 5000,
+                timeout: 10000,
             });
 
+            socket.setKeepAlive(true, 60000);
+            socket.setNoDelay(true);
+
             // Handshake
-            socket.write(Buffer.from([0x00]));
+            socket.write(Buffer.from([0x00, 0x00, 0x00, 0x00, 0x00])); // 5 null bytes
+
+            socket.on('connect', () => {
+                console.log('TCP connection established');
+            });
+
+            socket.on('ready', () => {
+                console.log('Socket ready for data');
+            });
+
+            socket.on('end', () => {
+                console.log('Server ended connection');
+            });
 
             socket.on('data', (data) => {
-                try {
-                    const seed = data.readUInt32BE(1);
-                    if (data.length >= 5 && data.readUInt8(0) === 0x01) {
-                        const encryptedRequest = xorEncrypt(
-                            Buffer.from([]),
-                            seed,
-                        );
-                        socket.write(encryptedRequest);
-                    } else {
-                        const decrypted = xorEncrypt(data, seed);
-                        const decompressed = inflateSync(decrypted);
-                        const servers = this.parseServerList(decompressed);
-                        resolve(servers);
-                        socket.end();
-                    }
-                } catch (err) {
-                    reject(err);
-                }
+                console.log('Data received from server:', data.length, 'bytes');
             });
 
             socket.on('error', reject);
