@@ -1,3 +1,4 @@
+import { ServerLister } from './serverLister';
 import { GraalRCConfig } from './types';
 
 async function main() {
@@ -8,6 +9,10 @@ async function main() {
         password: 'randrandbr',
         nickname: 'Ruan',
     };
+
+    const serverlister = new ServerLister(config);
+    const servers = await serverlister.fetchServerList();
+    console.log('Servers:', servers);
 }
 
 main();
