@@ -18,6 +18,7 @@
         "typescript": "^5.8.2"
     },
     "dependencies": {
-        "compressjs": "^1.0.3"
+        "compressjs": "^1.0.3",
+        "dotenv": "^16.4.7"
     }
 }
